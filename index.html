@@ -27,18 +27,7 @@
     <dl id="env"></dl>
     <p class="muted">On iPhone: Share → Add to Home Screen, then open from the icon. Every check below runs in the installed app.</p>
   </section>
-  <section data-vault="a">
-    <h2>Vault A</h2>
-    <div class="row"><button data-act="enroll">Enroll A</button><button class="secondary" data-act="local">Local test</button><button class="secondary" data-act="unsub">Unsubscribe</button></div>
-    <p class="status muted"></p>
-    <div class="out" hidden><button class="secondary" data-act="copy">Copy subscription</button><pre></pre></div>
-  </section>
-  <section data-vault="b">
-    <h2>Vault B</h2>
-    <div class="row"><button data-act="enroll">Enroll B</button><button class="secondary" data-act="local">Local test</button><button class="secondary" data-act="unsub">Unsubscribe</button></div>
-    <p class="status muted"></p>
-    <div class="out" hidden><button class="secondary" data-act="copy">Copy subscription</button><pre></pre></div>
-  </section>
+  <div id="slots"></div>
   <section>
     <h2>Registrations on this origin</h2>
     <div class="row"><button class="secondary" id="refresh">Refresh</button></div>
@@ -46,7 +35,17 @@
   </section>
 </main>
 <script>
-const KEYS = { a: "BOee6WGbm65RoVd-dlDZVVOhx_OQE_6ajXLBw8SCbbkywKvzFXwsB2ERA9gMICwVDSv5ZgqdQCoJQQxmi4GreGc", b: "BMGiJp0x6SSVSIWmBCj7pf7qRqM__hQv1QXRwFKltTK5mpA7-y12JygsBEb6ZkUO07eDOuYT23jbwNcZP4YVIck" };
+const SLOTS = [{"id":"pack-qa-push","label":"pack-qa-push","key":"BOee6WGbm65RoVd-dlDZVVOhx_OQE_6ajXLBw8SCbbkywKvzFXwsB2ERA9gMICwVDSv5ZgqdQCoJQQxmi4GreGc"},{"id":"uffish-debug","label":"uffish-debug","key":"BCK86pb-78y_OVzdQF5GqnvRJMcTZKxr7oGn8A7sO-nDdD8RIeEFLiDrsrlpeYYfHnkd04L15BunXp9_dY4_d2Q"},{"id":"test","label":"Test vault","key":"BMGiJp0x6SSVSIWmBCj7pf7qRqM__hQv1QXRwFKltTK5mpA7-y12JygsBEb6ZkUO07eDOuYT23jbwNcZP4YVIck"}];
+const KEYS = Object.fromEntries(SLOTS.map((slot) => [slot.id, slot.key]));
+const LABEL = Object.fromEntries(SLOTS.map((slot) => [slot.id, slot.label]));
+document.getElementById("slots").innerHTML = SLOTS.map((slot) => `
+  <section data-vault="${slot.id}">
+    <h2>${slot.label}</h2>
+    <div class="row"><button data-act="enroll">Enroll</button><button class="secondary" data-act="local">Local test</button><button class="secondary" data-act="unsub">Unsubscribe</button></div>
+    <p class="status muted"></p>
+    <p class="muted">Key ${slot.key.slice(0, 12)}… · scope ./v/${slot.id}/</p>
+    <div class="out" hidden><button class="secondary" data-act="copy">Copy subscription</button><pre></pre></div>
+  </section>`).join("");
 const scopeFor = (v) => new URL(`./v/${v}/`, location.href).href;
 const b64uToBytes = (s) => { const pad = "=".repeat((4 - (s.length % 4)) % 4); const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(raw, (c) => c.charCodeAt(0)); };
 const bytesToB64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -105,7 +104,7 @@ async function act(v, what, button) {
     } else if (what === "local") {
       const reg = await navigator.serviceWorker.getRegistration(scopeFor(v));
       if (!reg) throw new Error("enroll first");
-      await reg.showNotification(`Local test · Vault ${v.toUpperCase()}`, { body: "Shown by this device without the network." });
+      await reg.showNotification(`Local test · ${LABEL[v]}`, { body: "Shown by this device without the network." });
     } else if (what === "unsub") {
       const reg = await navigator.serviceWorker.getRegistration(scopeFor(v));
       const sub = reg && await reg.pushManager.getSubscription();
@@ -140,7 +139,8 @@ document.querySelectorAll("section[data-vault]").forEach((section) => {
     if (button) act(section.dataset.vault, button.dataset.act, button);
   });
 });
-document.getElementById("refresh").addEventListener("click", () => { env(); regs(); describe("a"); describe("b"); });
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { describe("a"); describe("b"); } });
-env(); regs(); describe("a"); describe("b");
+const describeAll = () => SLOTS.forEach((slot) => describe(slot.id));
+document.getElementById("refresh").addEventListener("click", () => { env(); regs(); describeAll(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) describeAll(); });
+env(); regs(); describeAll();
 </script>

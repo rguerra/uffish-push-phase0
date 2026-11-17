@@ -1,4 +1,4 @@
-/* Uffish push Phase 0 spike worker. One file, registered once per vault scope (./v/a/, ./v/b/). */
+/* Uffish push Phase 0 spike worker. One file, registered once per vault slot (./v/<slot>/). */
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 const vaultOf = () => (self.registration.scope.match(/\/v\/([^/]+)\/$/) || [])[1] || "?";
@@ -15,7 +15,7 @@ self.addEventListener("push", (event) => {
     // revokes permission for the whole install or only this scope.
     if (data.silent) return undefined;
     return self.registration.showNotification(data.title || "Uffish Phase 0", {
-      body: `${data.body || ""} · scope ${vaultOf().toUpperCase()}`,
+      body: `${data.body || ""} · slot ${vaultOf()}`,
       data
     });
   });
