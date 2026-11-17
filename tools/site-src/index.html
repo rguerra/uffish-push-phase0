@@ -1,0 +1,146 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="./manifest.webmanifest">
+<title>Uffish push Phase 0</title>
+<style>
+  :root { --bg:#f7f7f4; --fg:#22262e; --muted:#5d6470; --card:#ffffff; --line:#dddad0; --accent:#29527E; --ok:#2F7D4B; --err:#A83C3C; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16181c; --fg:#e7e5df; --muted:#9aa0aa; --card:#1f2228; --line:#30343c; --accent:#7fa8d6; --ok:#6cc08b; --err:#e07a7a; } }
+  body { font: 16px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; background: var(--bg); color: var(--fg); }
+  main { max-width: 34rem; margin: 0 auto; }
+  h1 { font-size: 1.25rem; margin: .5rem 0 1rem; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; }
+  h2 { font-size: 1rem; margin: 0 0 .5rem; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin: .5rem 0; }
+  button { font: inherit; padding: .5em 1em; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+  button.secondary { background: transparent; color: var(--accent); }
+  pre { background: var(--bg); border: 1px solid var(--line); padding: .6em; border-radius: 6px; font-size: .72rem; white-space: pre-wrap; word-break: break-all; margin: .4rem 0 0; }
+  .muted { color: var(--muted); font-size: .85rem; }
+  .ok { color: var(--ok); } .err { color: var(--err); }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 0; font-size: .85rem; }
+  dt { color: var(--muted); } dd { margin: 0; word-break: break-all; }
+</style>
+<main>
+  <h1>Uffish push Phase 0 spike</h1>
+  <section>
+    <h2>This device</h2>
+    <dl id="env"></dl>
+    <p class="muted">On iPhone: Share → Add to Home Screen, then open from the icon. Every check below runs in the installed app.</p>
+  </section>
+  <section data-vault="a">
+    <h2>Vault A</h2>
+    <div class="row"><button data-act="enroll">Enroll A</button><button class="secondary" data-act="local">Local test</button><button class="secondary" data-act="unsub">Unsubscribe</button></div>
+    <p class="status muted"></p>
+    <div class="out" hidden><button class="secondary" data-act="copy">Copy subscription</button><pre></pre></div>
+  </section>
+  <section data-vault="b">
+    <h2>Vault B</h2>
+    <div class="row"><button data-act="enroll">Enroll B</button><button class="secondary" data-act="local">Local test</button><button class="secondary" data-act="unsub">Unsubscribe</button></div>
+    <p class="status muted"></p>
+    <div class="out" hidden><button class="secondary" data-act="copy">Copy subscription</button><pre></pre></div>
+  </section>
+  <section>
+    <h2>Registrations on this origin</h2>
+    <div class="row"><button class="secondary" id="refresh">Refresh</button></div>
+    <pre id="regs">…</pre>
+  </section>
+</main>
+<script>
+const KEYS = { a: "__KEY_A__", b: "__KEY_B__" };
+const scopeFor = (v) => new URL(`./v/${v}/`, location.href).href;
+const b64uToBytes = (s) => { const pad = "=".repeat((4 - (s.length % 4)) % 4); const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(raw, (c) => c.charCodeAt(0)); };
+const bytesToB64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+function env() {
+  const standalone = navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+  const rows = {
+    "Installed app": standalone ? "yes" : "no — Add to Home Screen first",
+    "Notifications": typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+    "Push API": "PushManager" in window ? "yes" : "no",
+    "Page URL": location.href,
+    "User agent": navigator.userAgent
+  };
+  document.getElementById("env").innerHTML = Object.entries(rows).map(([k, v]) => `<dt>${k}</dt><dd>${String(v).replace(/</g, "&lt;")}</dd>`).join("");
+}
+
+// navigator.serviceWorker.ready never resolves for a registration whose scope
+// does not cover this page (./v/a/ does not cover ./index.html), so wait for
+// THIS registration's worker to reach "activated" instead.
+function activated(reg) {
+  if (reg.active) return Promise.resolve(reg);
+  const worker = reg.installing || reg.waiting;
+  return new Promise((resolve) => worker.addEventListener("statechange", () => { if (worker.state === "activated") resolve(reg); }));
+}
+
+async function lastPush(v) {
+  try { const hit = await (await caches.open("phase0")).match(`last-${v}`); return hit ? hit.json() : null; } catch { return null; }
+}
+
+async function describe(v) {
+  const section = document.querySelector(`section[data-vault="${v}"]`);
+  const status = section.querySelector(".status");
+  const reg = await navigator.serviceWorker.getRegistration(scopeFor(v));
+  const sub = reg ? await reg.pushManager.getSubscription() : null;
+  const last = await lastPush(v);
+  const keyOk = sub && sub.options && sub.options.applicationServerKey ? bytesToB64u(sub.options.applicationServerKey) === KEYS[v] : null;
+  status.className = `status ${sub ? "ok" : "muted"}`;
+  status.textContent = [
+    sub ? `Subscribed → ${new URL(sub.endpoint).host}` : reg ? "Registered, not subscribed" : "Not enrolled",
+    keyOk === null ? "" : keyOk ? "key matches" : "KEY MISMATCH",
+    last ? `last push ${new Date(last.receivedAt).toLocaleTimeString()}${last.sentAt ? ` (${last.receivedAt - last.sentAt} ms)` : ""}${last.silent ? " silent" : ""}` : ""
+  ].filter(Boolean).join(" · ");
+  if (sub) { section.querySelector(".out").hidden = false; section.querySelector("pre").textContent = JSON.stringify(sub.toJSON()); }
+}
+
+async function act(v, what, button) {
+  const section = document.querySelector(`section[data-vault="${v}"]`);
+  const status = section.querySelector(".status");
+  try {
+    if (what === "enroll") {
+      const reg = await activated(await navigator.serviceWorker.register("./sw.js", { scope: scopeFor(v) }));
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") throw new Error(`permission ${perm}`);
+      const existing = await reg.pushManager.getSubscription();
+      if (!existing) await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBytes(KEYS[v]) });
+    } else if (what === "local") {
+      const reg = await navigator.serviceWorker.getRegistration(scopeFor(v));
+      if (!reg) throw new Error("enroll first");
+      await reg.showNotification(`Local test · Vault ${v.toUpperCase()}`, { body: "Shown by this device without the network." });
+    } else if (what === "unsub") {
+      const reg = await navigator.serviceWorker.getRegistration(scopeFor(v));
+      const sub = reg && await reg.pushManager.getSubscription();
+      if (sub) await sub.unsubscribe();
+      section.querySelector(".out").hidden = true;
+    } else if (what === "copy") {
+      await navigator.clipboard.writeText(section.querySelector("pre").textContent);
+      button.textContent = "Copied";
+      return;
+    }
+    await describe(v);
+  } catch (error) {
+    status.className = "status err";
+    status.textContent = String(error);
+  }
+  env();
+  regs();
+}
+
+async function regs() {
+  const list = await navigator.serviceWorker.getRegistrations();
+  const lines = await Promise.all(list.map(async (reg) => {
+    const sub = await reg.pushManager.getSubscription().catch(() => null);
+    return `${reg.scope}\n  ${reg.active ? reg.active.state : "no active worker"} · ${sub ? new URL(sub.endpoint).host : "no subscription"}`;
+  }));
+  document.getElementById("regs").textContent = lines.join("\n") || "none";
+}
+
+document.querySelectorAll("section[data-vault]").forEach((section) => {
+  section.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-act]");
+    if (button) act(section.dataset.vault, button.dataset.act, button);
+  });
+});
+document.getElementById("refresh").addEventListener("click", () => { env(); regs(); describe("a"); describe("b"); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { describe("a"); describe("b"); } });
+env(); regs(); describe("a"); describe("b");
+</script>
